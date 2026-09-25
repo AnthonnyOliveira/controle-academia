@@ -27,7 +27,17 @@ Recomendei um reajuste dos horários, o que **abriu espaço para 2 alunos a mais
 - **Alunos:** cadastro com nome, horário marcado e atividades habituais.
 - **Check-in:** registro da chegada e da saída reais, com botão "Agora".
 - **Histórico:** tabela com tempo planejado, tempo real e a diferença entre eles.
-- **Dashboard:** tempo médio de permanência e horário de chegada mais comum (moda) por aluno.
+- **Dashboard:** diferença média na chegada e moda por horário marcado, ocupação média da sala a cada 15 minutos, e tempo médio de permanência por aluno.
+
+## Dados de demonstração (simulados)
+
+Os dados reais do studio ficaram salvos no navegador do computador onde o app foi usado. Para demonstrar a análise, o botão **"Carregar dados de exemplo (simulados)"** gera 1 mês de check-ins **fictícios** (agosto de 2026, 96 alunos, cerca de 800 check-ins) com o mesmo padrão observado:
+
+- Studio funcionando das 16h às 20h, de segunda a sexta.
+- Por hora: 4 alunos às :00, 3 às :15, 3 às :30 e 2 às :45.
+- A turma das **18:00** chega em média **13 min atrasada**, e a das **18:30**, **13 min adiantada**.
+
+No Dashboard, as duas turmas aparecem com a mesma chegada mais comum (**18:15**), e o gráfico de ocupação mostra o **pico às 18:30**. Foi essa sobreposição que motivou o reajuste de horários.
 
 ## Tecnologias
 

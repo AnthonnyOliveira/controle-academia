@@ -46,6 +46,11 @@
   <div>
     <p class="aca-h1">Controle da academia</p>
     <p class="aca-sub">Cadastro de alunos, check-in do dia e histórico de tempo real</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+      <button class="aca-btn" id="btnDemo">Carregar dados de exemplo (simulados)</button>
+      <button class="aca-btn aca-btn-danger" id="btnClear">Apagar todos os dados</button>
+    </div>
+    <div id="demoBanner"></div>
   </div>
   <div class="aca-tabs" id="acaTabs">
     <div class="aca-tab active" data-tab="alunos">Alunos</div>
@@ -90,6 +95,7 @@
       const raw = localStorage.getItem(STORAGE_KEY_CHECKINS);
       checkins = raw ? JSON.parse(raw) : [];
     }catch(e){ checkins = []; }
+    renderBanner();
     render();
   }
 
@@ -101,6 +107,131 @@
     try{ localStorage.setItem(STORAGE_KEY_CHECKINS, JSON.stringify(checkins)); }
     catch(e){ alert('Não foi possível salvar o registro neste navegador.'); }
   }
+
+  // ===== Dados de demonstração (SIMULADOS) =====
+  // Gera 1 mês de check-ins fictícios que reproduzem o padrão observado no studio:
+  // a turma das 18:00 chegava atrasada e a das 18:30 chegava adiantada.
+  const STORAGE_KEY_DEMO = 'academia_checkin_demo_v1';
+
+  // Gerador de números aleatórios com "semente": gera sempre os mesmos dados.
+  function mulberry32(a){
+    return function(){
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function generateDemoData(){
+    const rnd = mulberry32(20260803);
+    const randInt = (a,b) => a + Math.floor(rnd() * (b - a + 1));
+
+    // Alunos por horário marcado, em cada hora das 16h às 19h45
+    const SLOT_PATTERN = [[0,4],[15,3],[30,3],[45,2]];
+    const slots = [];
+    for(let h = 16; h <= 19; h++){
+      SLOT_PATTERN.forEach(([m,count]) => {
+        slots.push({ hhmm: String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0'), count });
+      });
+    }
+
+    // Dois grupos: segunda/quarta/sexta e terça/quinta
+    const groups = [[1,3,5],[2,4]];
+    const newStudents = [];
+    let n = 0;
+    groups.forEach(dias => {
+      slots.forEach(slot => {
+        for(let i = 0; i < slot.count; i++){
+          n++;
+          const ids = ACTIVITIES.map(a => a.id).sort(() => rnd() - 0.5);
+          const qtd = rnd() < 0.5 ? 3 : 4; // 3 ou 4 estações = 45 ou 60 min
+          newStudents.push({
+            id: 'demo' + n,
+            nome: 'Aluno',
+            sobrenome: String(n).padStart(2,'0') + ' (fictício)',
+            horario: slot.hhmm,
+            atividades: ids.slice(0, qtd),
+            dias
+          });
+        }
+      });
+    });
+
+    // 4 semanas: 03/08/2026 a 28/08/2026
+    const newCheckins = [];
+    let k = 0;
+    for(let day = 3; day <= 28; day++){
+      const date = new Date(2026, 7, day);
+      const weekday = date.getDay(); // 0 = domingo
+      if(weekday === 0 || weekday === 6) continue;
+      const iso = '2026-08-' + String(day).padStart(2,'0');
+
+      newStudents.forEach(s => {
+        if(!s.dias.includes(weekday)) return;
+        if(rnd() > 0.85) return; // cerca de 15% de faltas
+
+        let offset;
+        if(s.horario === '18:00') offset = randInt(5, 20);       // chega atrasado
+        else if(s.horario === '18:30') offset = randInt(-20, -5); // chega adiantado
+        else offset = randInt(-5, 5);                             // chega no horário
+
+        const plannedMin = s.atividades.length * MIN_PER_STATION;
+        const chegada = addMinutes(s.horario, offset);
+        const saida = addMinutes(chegada, plannedMin + randInt(-5, 5));
+        k++;
+        newCheckins.push({
+          id: 'democ' + k,
+          studentId: s.id,
+          data: iso,
+          activities: s.atividades.slice(),
+          horarioMarcado: s.horario,
+          saidaPlanejada: addMinutes(s.horario, plannedMin),
+          chegadaReal: chegada,
+          saidaReal: saida,
+          plannedMin
+        });
+      });
+    }
+    return { students: newStudents, checkins: newCheckins };
+  }
+
+  function isDemo(){
+    try{ return localStorage.getItem(STORAGE_KEY_DEMO) === '1'; }catch(e){ return false; }
+  }
+
+  function renderBanner(){
+    const el = document.getElementById('demoBanner');
+    el.innerHTML = isDemo()
+      ? '<p style="margin:10px 0 0; padding:8px 12px; border-radius:8px; background:var(--tape-bg); color:var(--tape-ink); font-size:13px;">' +
+        '<b>Dados simulados.</b> Alunos e check-ins fictícios, gerados para demonstração com o mesmo padrão observado no studio ' +
+        '(turma das 18:00 chegando atrasada e turma das 18:30 chegando adiantada).</p>'
+      : '';
+  }
+
+  document.getElementById('btnDemo').addEventListener('click', async ()=>{
+    if((students.length || checkins.length) && !confirm('Isso vai substituir os dados atuais pelos dados de exemplo. Continuar?')) return;
+    const demo = generateDemoData();
+    students = demo.students;
+    checkins = demo.checkins;
+    await saveStudents();
+    await saveCheckins();
+    try{ localStorage.setItem(STORAGE_KEY_DEMO, '1'); }catch(e){}
+    activeTab = 'dashboard';
+    renderBanner();
+    render();
+  });
+
+  document.getElementById('btnClear').addEventListener('click', async ()=>{
+    if(!confirm('Apagar todos os alunos e check-ins deste navegador?')) return;
+    students = [];
+    checkins = [];
+    await saveStudents();
+    await saveCheckins();
+    try{ localStorage.removeItem(STORAGE_KEY_DEMO); }catch(e){}
+    renderBanner();
+    render();
+  });
 
   function fmtTime(t){ return t || '--:--'; }
 
@@ -125,6 +256,12 @@
     let d = mb - ma;
     if(d < 0) d += 24*60;
     return d;
+  }
+  // Diferença em minutos (b - a), podendo ser negativa. Ex.: 18:00 -> 17:50 = -10
+  function diffSigned(a,b){
+    const ma = toMinutes(a), mb = toMinutes(b);
+    if(ma === null || mb === null) return null;
+    return mb - ma;
   }
   function nowHHMM(){
     const d = new Date();
@@ -506,7 +643,68 @@
       return;
     }
 
-    let html = '<div style="overflow-x:auto;"><table class="aca-table">';
+    let html = '';
+
+    // --- 1) Por horário marcado: a chegada real bate com o horário marcado? ---
+    const bySlot = {};
+    checkins.forEach(c => {
+      const diff = diffSigned(c.horarioMarcado, c.chegadaReal);
+      if(diff === null) return;
+      (bySlot[c.horarioMarcado] = bySlot[c.horarioMarcado] || { diffs: [], arrivals: [] });
+      bySlot[c.horarioMarcado].diffs.push(diff);
+      bySlot[c.horarioMarcado].arrivals.push(c.chegadaReal);
+    });
+    const slotKeys = Object.keys(bySlot).sort();
+    if(slotKeys.length){
+      html += '<p style="font-weight:600; font-size:15px; margin:4px 0 6px;">Chegada real por horário marcado</p>';
+      html += '<div style="overflow-x:auto;"><table class="aca-table"><thead><tr><th>Horário marcado</th><th>Check-ins</th><th>Diferença média na chegada</th><th>Chegada mais comum (moda)</th></tr></thead><tbody>';
+      slotKeys.forEach(k => {
+        const d = bySlot[k].diffs;
+        const media = Math.round(d.reduce((a,b)=>a+b,0) / d.length);
+        const moda = modeOfArrivals(bySlot[k].arrivals, 15);
+        const alerta = Math.abs(media) >= 8;
+        const tag = alerta
+          ? '<span class="aca-tag" style="background:var(--alert-bg);color:var(--alert-ink)">' + (media>0?'+':'') + media + ' min (' + (media>0?'atrasados':'adiantados') + ')</span>'
+          : '<span class="aca-tag" style="background:var(--tape-bg);color:var(--tape-ink)">' + (media>0?'+':'') + media + ' min</span>';
+        html += '<tr><td>' + k + '</td><td>' + d.length + '</td><td>' + tag + '</td><td>' + (moda ? moda.label : '--') + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      html += '<p style="font-size:12px; color:var(--muted); margin:6px 0 16px;">Diferença = chegada real menos horário marcado. Positivo = atraso; negativo = adiantado.</p>';
+    }
+
+    // --- 2) Ocupação média por faixa de 15 minutos ---
+    const dias = new Set(checkins.map(c => c.data)).size;
+    const occ = {};
+    checkins.forEach(c => {
+      const a = toMinutes(c.chegadaReal), b = toMinutes(c.saidaReal);
+      if(a === null || b === null) return;
+      for(let t = Math.ceil(a/15)*15; t < b; t += 15){ occ[t] = (occ[t] || 0) + 1; }
+    });
+    const occKeys = Object.keys(occ).map(Number).sort((x,y)=>x-y);
+    if(occKeys.length && dias){
+      const avgs = occKeys.map(t => occ[t] / dias);
+      const max = Math.max(...avgs);
+      html += '<p style="font-weight:600; font-size:15px; margin:4px 0 6px;">Ocupação média da sala por horário</p>';
+      html += '<div class="aca-card">';
+      occKeys.forEach((t, i) => {
+        const v = avgs[i];
+        const pico = v === max;
+        const label = String(Math.floor(t/60)).padStart(2,'0') + ':' + String(t%60).padStart(2,'0');
+        html += '<div style="display:flex; align-items:center; gap:8px; font-size:12px; margin:3px 0;">' +
+          '<span style="width:40px; color:var(--muted);">' + label + '</span>' +
+          '<div style="flex:1; background:var(--bg); border-radius:4px; height:14px;">' +
+            '<div style="width:' + (v/max*100).toFixed(0) + '%; height:14px; border-radius:4px; background:' + (pico ? 'var(--alert)' : 'var(--accent)') + ';"></div>' +
+          '</div>' +
+          '<span style="width:70px; text-align:right;' + (pico ? 'font-weight:600; color:var(--alert-ink);' : '') + '">' + v.toFixed(1) + ' alunos</span>' +
+        '</div>';
+      });
+      html += '</div>';
+      html += '<p style="font-size:12px; color:var(--muted); margin:6px 0 16px;">Média de alunos presentes ao mesmo tempo em cada faixa, considerando ' + dias + ' dias com registros. Em vermelho, o pico.</p>';
+    }
+
+    // --- 3) Por aluno ---
+    html += '<p style="font-weight:600; font-size:15px; margin:4px 0 6px;">Por aluno</p>';
+    html += '<div style="overflow-x:auto;"><table class="aca-table">';
     html += '<thead><tr><th>Aluno</th><th>Visitas</th><th>Tempo médio real</th><th>Horário mais comum de chegada</th></tr></thead><tbody>';
     rows.forEach(r=>{
       html += '<tr>' +
