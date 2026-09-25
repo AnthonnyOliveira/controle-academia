@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle da Academia</title>
+</head>
+<body style="margin:0; padding:24px; background:#EDF0EC; min-height:100vh; box-sizing:border-box;">
+<style>
+  :root{
+    --bg:#EDF0EC; --surface:#FFFFFF; --ink:#1B1F1D; --muted:#6B7269; --line:#D7DBD4;
+    --accent:#2454FF; --accent-bg:#E3E9FF; --accent-ink:#142E80;
+    --tape:#B6FF3B; --tape-bg:#EAFAD1; --tape-ink:#2B4B02;
+    --alert:#E8452C; --alert-bg:#FBE3DE; --alert-ink:#7A2314;
+    --pilates:#7A5CFA; --pilates-bg:#EEEAFE; --pilates-ink:#3B2296;
+    --musc:#2454FF; --musc-bg:#E3E9FF; --musc-ink:#142E80;
+    --cardio:#E8452C; --cardio-bg:#FCE7E2; --cardio-ink:#7A2314;
+    --func:#3C9A3C; --func-bg:#E5F5E1; --func-ink:#245A1D;
+  }
+  .aca-app{background:var(--bg); color:var(--ink); font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; padding:1.25rem; border-radius:16px;}
+  .aca-h1{font-size:20px; font-weight:700; letter-spacing:-0.01em; margin:0;}
+  .aca-sub{font-size:13px; color:var(--muted); margin:2px 0 0;}
+  .aca-tabs{display:flex; gap:6px; margin:1rem 0 1rem; border-bottom:1px solid var(--line);}
+  .aca-tab{padding:8px 14px; font-size:14px; font-weight:500; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; user-select:none;}
+  .aca-tab.active{color:var(--ink); border-bottom:2px solid var(--accent);}
+  .aca-card{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px;}
+  .aca-input{width:100%; box-sizing:border-box; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:14px; font-family:inherit; background:var(--surface); color:var(--ink);}
+  .aca-input:focus{outline:none; border-color:var(--accent);}
+  .aca-btn{padding:9px 14px; border-radius:8px; border:1px solid var(--line); background:var(--surface); font-size:14px; font-weight:500; cursor:pointer; color:var(--ink);}
+  .aca-btn:hover{background:var(--bg);}
+  .aca-btn-primary{background:var(--accent); color:#fff; border:1px solid var(--accent);}
+  .aca-btn-primary:hover{opacity:0.92;}
+  .aca-btn-danger{color:var(--alert-ink); border-color:var(--alert-bg);}
+  .aca-chip{display:inline-flex; align-items:center; padding:6px 12px; border-radius:20px; font-size:13px; font-weight:500; cursor:pointer; border:1px solid var(--line); margin:0 6px 6px 0; user-select:none;}
+  .aca-row{display:flex; gap:10px; flex-wrap:wrap;}
+  .aca-label{font-size:12px; color:var(--muted); display:block; margin-bottom:4px;}
+  .aca-field{flex:1; min-width:130px;}
+  .aca-empty{text-align:center; color:var(--muted); font-size:14px; padding:2rem 0;}
+  table.aca-table{width:100%; border-collapse:collapse; font-size:13px;}
+  table.aca-table th{text-align:left; color:var(--muted); font-weight:500; padding:8px 6px; border-bottom:1px solid var(--line); white-space:nowrap;}
+  table.aca-table td{padding:8px 6px; border-bottom:1px solid var(--line); white-space:nowrap;}
+  .aca-tag{display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:500; margin-right:4px;}
+</style>
+
+<div class="aca-app" id="acaApp">
+  <div>
+    <p class="aca-h1">Controle da academia</p>
+    <p class="aca-sub">Cadastro de alunos, check-in do dia e histórico de tempo real</p>
+  </div>
+  <div class="aca-tabs" id="acaTabs">
+    <div class="aca-tab active" data-tab="alunos">Alunos</div>
+    <div class="aca-tab" data-tab="checkin">Check-in</div>
+    <div class="aca-tab" data-tab="historico">Histórico</div>
+    <div class="aca-tab" data-tab="dashboard">Dashboard</div>
+  </div>
+  <div id="acaContent"></div>
+</div>
+
+<script>
+(function(){
+  const ACTIVITIES = [
+    {id:'pilates', label:'Pilates', bg:'var(--pilates-bg)', fg:'var(--pilates-ink)'},
+    {id:'musculacao', label:'Musculação', bg:'var(--musc-bg)', fg:'var(--musc-ink)'},
+    {id:'cardio', label:'Cardio', bg:'var(--cardio-bg)', fg:'var(--cardio-ink)'},
+    {id:'funcional', label:'Funcional', bg:'var(--func-bg)', fg:'var(--func-ink)'}
+  ];
+  const MIN_PER_STATION = 15;
+
+  let students = [];
+  let checkins = [];
+  let activeTab = 'alunos';
+  let expandedStudentId = null;
+  let draftByStudent = {};
+
+  const content = document.getElementById('acaContent');
+  const tabs = document.getElementById('acaTabs');
+
+  function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+  const STORAGE_KEY_STUDENTS = 'academia_checkin_students_v1';
+  const STORAGE_KEY_CHECKINS = 'academia_checkin_logs_v1';
+
+  async function loadAll(){
+    content.innerHTML = '<p class="aca-empty">Carregando...</p>';
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY_STUDENTS);
+      students = raw ? JSON.parse(raw) : [];
+    }catch(e){ students = []; }
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY_CHECKINS);
+      checkins = raw ? JSON.parse(raw) : [];
+    }catch(e){ checkins = []; }
+    render();
+  }
+
+  async function saveStudents(){
+    try{ localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(students)); }
+    catch(e){ alert('Não foi possível salvar os dados do aluno neste navegador.'); }
+  }
+  async function saveCheckins(){
+    try{ localStorage.setItem(STORAGE_KEY_CHECKINS, JSON.stringify(checkins)); }
+    catch(e){ alert('Não foi possível salvar o registro neste navegador.'); }
+  }
+
+  function fmtTime(t){ return t || '--:--'; }
+
+  function toMinutes(hhmm){
+    if(!hhmm) return null;
+    const [h,m] = hhmm.split(':').map(Number);
+    if(isNaN(h) || isNaN(m)) return null;
+    return h*60+m;
+  }
+  function addMinutes(hhmm, mins){
+    const total = toMinutes(hhmm);
+    if(total === null) return '';
+    let t = (total + mins) % (24*60);
+    if(t < 0) t += 24*60;
+    const h = Math.floor(t/60).toString().padStart(2,'0');
+    const m = (t%60).toString().padStart(2,'0');
+    return h+':'+m;
+  }
+  function diffMinutes(a,b){
+    const ma = toMinutes(a), mb = toMinutes(b);
+    if(ma === null || mb === null) return null;
+    let d = mb - ma;
+    if(d < 0) d += 24*60;
+    return d;
+  }
+  function nowHHMM(){
+    const d = new Date();
+    return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+  }
+  function todayISO(){
+    const d = new Date();
+    return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0');
+  }
+  function fmtDateBR(iso){
+    const [y,m,d] = iso.split('-');
+    return d+'/'+m+'/'+y;
+  }
+
+  function activityChip(id){
+    const a = ACTIVITIES.find(x=>x.id===id);
+    if(!a) return '';
+    return '<span class="aca-tag" style="background:'+a.bg+';color:'+a.fg+'">'+a.label+'</span>';
+  }
+
+  function render(){
+    tabs.querySelectorAll('.aca-tab').forEach(t=>{
+      t.classList.toggle('active', t.dataset.tab === activeTab);
+    });
+    if(activeTab === 'alunos') renderAlunos();
+    else if(activeTab === 'checkin') renderCheckin();
+    else if(activeTab === 'historico') renderHistorico();
+    else renderDashboard();
+  }
+
+  tabs.addEventListener('click', (e)=>{
+    const t = e.target.closest('.aca-tab');
+    if(!t) return;
+    activeTab = t.dataset.tab;
+    expandedStudentId = null;
+    render();
+  });
+
+  function renderAlunos(){
+    let html = '';
+    html += '<div class="aca-card">';
+    html += '<p class="aca-label">Nome</p><input class="aca-input" id="newNome" placeholder="Nome" />';
+    html += '<div style="height:8px"></div>';
+    html += '<p class="aca-label">Sobrenome</p><input class="aca-input" id="newSobrenome" placeholder="Sobrenome" />';
+    html += '<div style="height:8px"></div>';
+    html += '<div class="aca-row">';
+    html += '<div class="aca-field"><p class="aca-label">Horário marcado</p><input class="aca-input" type="time" id="newHorario" /></div>';
+    html += '</div>';
+    html += '<div style="height:8px"></div>';
+    html += '<p class="aca-label">Atividades habituais</p>';
+    html += '<div id="newAtividades">' + ACTIVITIES.map(a=>
+      '<span class="aca-chip" data-act="'+a.id+'" style="background:var(--bg)">'+a.label+'</span>'
+    ).join('') + '</div>';
+    html += '<div style="height:6px"></div>';
+    html += '<button class="aca-btn aca-btn-primary" id="btnAddStudent">Cadastrar aluno</button>';
+    html += '<span id="addStudentError" style="color:var(--alert-ink); font-size:13px; margin-left:10px;"></span>';
+    html += '</div>';
+
+    html += '<input class="aca-input" id="searchAlunos" placeholder="Buscar aluno..." style="margin-bottom:10px;" />';
+
+    if(students.length === 0){
+      html += '<p class="aca-empty">Nenhum aluno cadastrado ainda.</p>';
+    }else{
+      html += '<div id="studentsList"></div>';
+    }
+    content.innerHTML = html;
+
+    let selectedActs = new Set();
+    content.querySelector('#newAtividades').addEventListener('click', (e)=>{
+      const chip = e.target.closest('.aca-chip');
+      if(!chip) return;
+      const id = chip.dataset.act;
+      const a = ACTIVITIES.find(x=>x.id===id);
+      if(selectedActs.has(id)){
+        selectedActs.delete(id);
+        chip.style.background = 'var(--bg)';
+        chip.style.color = 'var(--ink)';
+        chip.style.borderColor = 'var(--line)';
+      }else{
+        selectedActs.add(id);
+        chip.style.background = a.bg;
+        chip.style.color = a.fg;
+        chip.style.borderColor = a.fg;
+      }
+    });
+
+    content.querySelector('#btnAddStudent').addEventListener('click', async ()=>{
+      const nome = content.querySelector('#newNome').value.trim();
+      const sobrenome = content.querySelector('#newSobrenome').value.trim();
+      const horario = content.querySelector('#newHorario').value;
+      const errEl = content.querySelector('#addStudentError');
+      if(!nome || !sobrenome || !horario){
+        errEl.textContent = 'Preencha nome, sobrenome e horário marcado.';
+        return;
+      }
+      errEl.textContent = '';
+      students.push({
+        id: uid(), nome, sobrenome, horario,
+        atividades: Array.from(selectedActs)
+      });
+      await saveStudents();
+      render();
+    });
+
+    function drawStudentsList(filter){
+      const list = content.querySelector('#studentsList');
+      if(!list) return;
+      const f = (filter||'').toLowerCase();
+      const filtered = students.filter(s => (s.nome+' '+s.sobrenome).toLowerCase().includes(f));
+      if(filtered.length === 0){
+        list.innerHTML = '<p class="aca-empty">Nenhum aluno encontrado.</p>';
+        return;
+      }
+      list.innerHTML = filtered.map(s => (
+        '<div class="aca-card" style="display:flex; justify-content:space-between; align-items:center;">' +
+          '<div>' +
+            '<p style="margin:0; font-weight:500; font-size:14px;">'+s.nome+' '+s.sobrenome+'</p>' +
+            '<p style="margin:2px 0 0; font-size:13px; color:var(--muted);">Horário marcado '+s.horario+' &middot; '+
+              (s.atividades.length ? s.atividades.map(a=>ACTIVITIES.find(x=>x.id===a).label).join(', ') : 'sem atividades habituais') +
+            '</p>' +
+          '</div>' +
+          '<button class="aca-btn aca-btn-danger" data-del="'+s.id+'">Remover</button>' +
+        '</div>'
+      )).join('');
+      list.querySelectorAll('[data-del]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          if(!confirm('Remover este aluno? O histórico de check-ins dele será mantido.')) return;
+          students = students.filter(s=>s.id !== btn.dataset.del);
+          await saveStudents();
+          render();
+        });
+      });
+    }
+    drawStudentsList('');
+    content.querySelector('#searchAlunos').addEventListener('input', (e)=> drawStudentsList(e.target.value));
+  }
+
+  function renderCheckin(){
+    let html = '<input class="aca-input" id="searchCheckin" placeholder="Buscar aluno para check-in..." style="margin-bottom:10px;" />';
+    if(students.length === 0){
+      html += '<p class="aca-empty">Cadastre um aluno na aba Alunos primeiro.</p>';
+      content.innerHTML = html;
+      return;
+    }
+    html += '<div id="checkinList"></div>';
+    content.innerHTML = html;
+
+    function drawList(filter){
+      const list = content.querySelector('#checkinList');
+      const f = (filter||'').toLowerCase();
+      const filtered = students.filter(s => (s.nome+' '+s.sobrenome).toLowerCase().includes(f));
+      if(filtered.length === 0){
+        list.innerHTML = '<p class="aca-empty">Nenhum aluno encontrado.</p>';
+        return;
+      }
+      list.innerHTML = filtered.map(s => renderStudentCheckinCard(s)).join('');
+      attachCheckinHandlers();
+    }
+
+    function renderStudentCheckinCard(s){
+      const isOpen = expandedStudentId === s.id;
+      const draft = draftByStudent[s.id] || {
+        activities: new Set(s.atividades || []),
+        chegada: '', saida: ''
+      };
+      draftByStudent[s.id] = draft;
+
+      let inner = '';
+      if(isOpen){
+        const plannedMin = draft.activities.size * MIN_PER_STATION;
+        const plannedExit = addMinutes(s.horario, plannedMin);
+        const realMin = diffMinutes(draft.chegada, draft.saida);
+
+        inner += '<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--line);">';
+        inner += '<p class="aca-label">Estações realizadas hoje</p>';
+        inner += ACTIVITIES.map(a=>{
+          const on = draft.activities.has(a.id);
+          return '<span class="aca-chip" data-open="'+s.id+'" data-act="'+a.id+'" style="'+
+            (on ? 'background:'+a.bg+';color:'+a.fg+';border-color:'+a.fg : 'background:var(--bg);color:var(--ink)') +
+            '">'+a.label+'</span>';
+        }).join('');
+        inner += '<div class="aca-row" style="margin-top:10px;">';
+        inner += '<div class="aca-field"><p class="aca-label">Chegada real</p>' +
+          '<div style="display:flex; gap:6px;"><input class="aca-input" type="time" data-open="'+s.id+'" data-field="chegada" value="'+draft.chegada+'" />' +
+          '<button class="aca-btn" data-open="'+s.id+'" data-now="chegada">Agora</button></div></div>';
+        inner += '<div class="aca-field"><p class="aca-label">Saída real</p>' +
+          '<div style="display:flex; gap:6px;"><input class="aca-input" type="time" data-open="'+s.id+'" data-field="saida" value="'+draft.saida+'" />' +
+          '<button class="aca-btn" data-open="'+s.id+'" data-now="saida">Agora</button></div></div>';
+        inner += '</div>';
+        inner += '<div class="aca-row" style="margin-top:12px;">';
+        inner += '<div class="aca-field"><p class="aca-label">Saída planejada</p><p style="margin:0; font-weight:500;">'+ (plannedExit || '--:--') +' <span style="color:var(--muted); font-weight:400; font-size:13px;">('+plannedMin+' min)</span></p></div>';
+        inner += '<div class="aca-field"><p class="aca-label">Tempo real</p><p style="margin:0; font-weight:500;">'+ (realMin !== null ? realMin+' min' : '--') +'</p></div>';
+        if(realMin !== null){
+          const diff = realMin - plannedMin;
+          const diffColor = diff > 0 ? 'var(--alert-ink)' : 'var(--tape-ink)';
+          const diffBg = diff > 0 ? 'var(--alert-bg)' : 'var(--tape-bg)';
+          inner += '<div class="aca-field"><p class="aca-label">Diferença</p><p style="margin:0;"><span class="aca-tag" style="background:'+diffBg+';color:'+diffColor+'">'+(diff>0? '+':'')+diff+' min</span></p></div>';
+        }
+        inner += '</div>';
+        inner += '<div style="margin-top:12px; display:flex; align-items:center; gap:10px;">';
+        inner += '<button class="aca-btn aca-btn-primary" data-save="'+s.id+'">Salvar registro</button>';
+        inner += '<span data-err="'+s.id+'" style="color:var(--alert-ink); font-size:13px;"></span>';
+        inner += '</div>';
+        inner += '</div>';
+      }
+
+      return '<div class="aca-card">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" data-toggle="'+s.id+'">' +
+          '<div>' +
+            '<p style="margin:0; font-weight:500; font-size:14px;">'+s.nome+' '+s.sobrenome+'</p>' +
+            '<p style="margin:2px 0 0; font-size:13px; color:var(--muted);">Horário marcado '+s.horario+'</p>' +
+          '</div>' +
+          '<span style="color:var(--muted); font-size:13px;">'+(isOpen ? 'Fechar' : 'Abrir')+'</span>' +
+        '</div>' +
+        inner +
+      '</div>';
+    }
+
+    function attachCheckinHandlers(){
+      const list = content.querySelector('#checkinList');
+      list.querySelectorAll('[data-toggle]').forEach(el=>{
+        el.addEventListener('click', ()=>{
+          const id = el.dataset.toggle;
+          expandedStudentId = (expandedStudentId === id) ? null : id;
+          drawList(content.querySelector('#searchCheckin').value);
+        });
+      });
+      list.querySelectorAll('[data-open][data-act]').forEach(chip=>{
+        chip.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          const sid = chip.dataset.open;
+          const act = chip.dataset.act;
+          const draft = draftByStudent[sid];
+          if(draft.activities.has(act)) draft.activities.delete(act);
+          else draft.activities.add(act);
+          drawList(content.querySelector('#searchCheckin').value);
+        });
+      });
+      list.querySelectorAll('input[data-field]').forEach(inp=>{
+        inp.addEventListener('click', e=>e.stopPropagation());
+        inp.addEventListener('change', (e)=>{
+          const sid = inp.dataset.open;
+          draftByStudent[sid][inp.dataset.field] = inp.value;
+          drawList(content.querySelector('#searchCheckin').value);
+        });
+      });
+      list.querySelectorAll('[data-now]').forEach(btn=>{
+        btn.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          const sid = btn.dataset.open;
+          draftByStudent[sid][btn.dataset.now] = nowHHMM();
+          drawList(content.querySelector('#searchCheckin').value);
+        });
+      });
+      list.querySelectorAll('[data-save]').forEach(btn=>{
+        btn.addEventListener('click', async (e)=>{
+          e.stopPropagation();
+          const sid = btn.dataset.save;
+          const s = students.find(x=>x.id===sid);
+          const draft = draftByStudent[sid];
+          const errEl = list.querySelector('[data-err="'+sid+'"]');
+          if(draft.activities.size === 0){
+            errEl.textContent = 'Marque ao menos uma estação realizada.';
+            return;
+          }
+          if(!draft.chegada){
+            errEl.textContent = 'Preencha a chegada real.';
+            return;
+          }
+          errEl.textContent = '';
+          const plannedMin = draft.activities.size * MIN_PER_STATION;
+          checkins.push({
+            id: uid(),
+            studentId: sid,
+            data: todayISO(),
+            activities: Array.from(draft.activities),
+            horarioMarcado: s.horario,
+            saidaPlanejada: addMinutes(s.horario, plannedMin),
+            chegadaReal: draft.chegada,
+            saidaReal: draft.saida || '',
+            plannedMin
+          });
+          await saveCheckins();
+          delete draftByStudent[sid];
+          expandedStudentId = null;
+          drawList('');
+          content.querySelector('#searchCheckin').value = '';
+        });
+      });
+    }
+
+    drawList('');
+    content.querySelector('#searchCheckin').addEventListener('input', (e)=> drawList(e.target.value));
+  }
+
+  function renderHistorico(){
+    if(checkins.length === 0){
+      content.innerHTML = '<p class="aca-empty">Nenhum registro de check-in ainda.</p>';
+      return;
+    }
+    const sorted = [...checkins].sort((a,b)=> (a.data+a.chegadaReal < b.data+b.chegadaReal ? 1 : -1));
+    let rows = sorted.map(c=>{
+      const s = students.find(x=>x.id === c.studentId);
+      const nome = s ? (s.nome+' '+s.sobrenome) : '(aluno removido)';
+      const realMin = diffMinutes(c.chegadaReal, c.saidaReal);
+      let diffCell = '--';
+      if(realMin !== null){
+        const diff = realMin - c.plannedMin;
+        const diffColor = diff > 0 ? 'var(--alert-ink)' : 'var(--tape-ink)';
+        const diffBg = diff > 0 ? 'var(--alert-bg)' : 'var(--tape-bg)';
+        diffCell = '<span class="aca-tag" style="background:'+diffBg+';color:'+diffColor+'">'+(diff>0?'+':'')+diff+' min</span>';
+      }
+      return '<tr>' +
+        '<td>'+fmtDateBR(c.data)+'</td>' +
+        '<td>'+nome+'</td>' +
+        '<td>'+c.activities.map(activityChip).join('')+'</td>' +
+        '<td>'+c.horarioMarcado+'</td>' +
+        '<td>'+c.saidaPlanejada+'</td>' +
+        '<td>'+fmtTime(c.chegadaReal)+'</td>' +
+        '<td>'+fmtTime(c.saidaReal)+'</td>' +
+        '<td>'+(realMin !== null ? realMin+' min' : '--')+'</td>' +
+        '<td>'+diffCell+'</td>' +
+        '<td><button class="aca-btn aca-btn-danger" data-delcheckin="'+c.id+'">Excluir</button></td>' +
+      '</tr>';
+    }).join('');
+    content.innerHTML = '<div style="overflow-x:auto;"><table class="aca-table">' +
+      '<thead><tr><th>Data</th><th>Aluno</th><th>Estações</th><th>Marcado</th><th>Saída planej.</th><th>Chegada real</th><th>Saída real</th><th>Tempo real</th><th>Diferença</th><th></th></tr></thead>' +
+      '<tbody>'+rows+'</tbody></table></div>';
+    content.querySelectorAll('[data-delcheckin]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        if(!confirm('Excluir este registro de check-in? Essa ação não pode ser desfeita.')) return;
+        checkins = checkins.filter(c => c.id !== btn.dataset.delcheckin);
+        await saveCheckins();
+        renderHistorico();
+      });
+    });
+  }
+
+  function roundToStep(mins, step){
+    return Math.round(mins/step)*step;
+  }
+
+  function modeOfArrivals(list, step){
+    if(list.length === 0) return null;
+    const buckets = {};
+    list.forEach(hhmm=>{
+      const m = toMinutes(hhmm);
+      if(m === null) return;
+      const b = roundToStep(m, step);
+      buckets[b] = (buckets[b] || 0) + 1;
+    });
+    let best = null, bestCount = 0;
+    Object.keys(buckets).forEach(k=>{
+      if(buckets[k] > bestCount){ bestCount = buckets[k]; best = Number(k); }
+    });
+    if(best === null) return null;
+    const h = Math.floor(best/60).toString().padStart(2,'0');
+    const m = (best%60).toString().padStart(2,'0');
+    return { label: h+':'+m, count: bestCount };
+  }
+
+  function renderDashboard(){
+    if(students.length === 0){
+      content.innerHTML = '<p class="aca-empty">Cadastre alunos e registre check-ins para ver o dashboard.</p>';
+      return;
+    }
+    const rows = students.map(s=>{
+      const cs = checkins.filter(c => c.studentId === s.id);
+      const withTime = cs.filter(c => c.chegadaReal && c.saidaReal);
+      const realMinList = withTime.map(c => diffMinutes(c.chegadaReal, c.saidaReal)).filter(v => v !== null);
+      const avg = realMinList.length ? Math.round(realMinList.reduce((a,b)=>a+b,0) / realMinList.length) : null;
+      const arrivals = cs.map(c => c.chegadaReal).filter(Boolean);
+      const moda = modeOfArrivals(arrivals, 15);
+      return { nome: s.nome+' '+s.sobrenome, visitas: cs.length, avg, moda };
+    }).filter(r => r.visitas > 0);
+
+    if(rows.length === 0){
+      content.innerHTML = '<p class="aca-empty">Nenhum check-in registrado ainda para calcular médias.</p>';
+      return;
+    }
+
+    let html = '<div style="overflow-x:auto;"><table class="aca-table">';
+    html += '<thead><tr><th>Aluno</th><th>Visitas</th><th>Tempo médio real</th><th>Horário mais comum de chegada</th></tr></thead><tbody>';
+    rows.forEach(r=>{
+      html += '<tr>' +
+        '<td>'+r.nome+'</td>' +
+        '<td>'+r.visitas+'</td>' +
+        '<td>'+(r.avg !== null ? r.avg+' min' : '--') +'</td>' +
+        '<td>'+(r.moda ? r.moda.label+' <span style="color:var(--muted); font-size:12px;">('+r.moda.count+' de '+r.visitas+')</span>' : '--')+'</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table></div>';
+    html += '<p style="font-size:12px; color:var(--muted); margin-top:10px;">Tempo médio considera apenas check-ins com chegada e saída preenchidas. Horário mais comum agrupa chegadas em intervalos de 15 minutos.</p>';
+    content.innerHTML = html;
+  }
+
+  loadAll();
+})();
+</script>
+
+</body>
+</html>
